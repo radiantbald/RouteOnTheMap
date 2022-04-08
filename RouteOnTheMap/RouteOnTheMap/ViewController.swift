@@ -40,8 +40,12 @@ class ViewController: UIViewController {
         return button
     }()
     
+    var annotationsArray = [MKPointAnnotation]()
+    
     override func viewDidLoad() {
         super.viewDidLoad()
+        
+        mapView.delegate = self
         
         setConstraints()
         
@@ -51,15 +55,90 @@ class ViewController: UIViewController {
     }
     
     @objc func addAdressButtonTapped() {
-        alertAddAdress(title: "Добавить адрес", placeholder: "Введите адрес") { (text) in
-            print(text)
+        
+        alertAddAdress(title: "Добавить адрес", placeholder: "Введите адрес") { [self] (text) in
+            setupPlacemark(adressPlace: text)
         }
     }
+    
     @objc func routeButtonTapped() {
-        print("TapRoute")
+        
+        for index in 0...annotationsArray.count - 2 {
+            createDirectionRequest(startCoordinate: annotationsArray[index].coordinate, destinationCoordinate: annotationsArray[index + 1].coordinate)
+        }
+        mapView.showAnnotations(annotationsArray, animated: true)
     }
+    
     @objc func resetButtonTapped() {
-        print("TapReset")
+        mapView.removeOverlays(mapView.overlays)
+        mapView.removeAnnotations(mapView.annotations)
+        annotationsArray = [MKPointAnnotation]()
+        routeButton.isHidden = true
+        resetButton.isHidden = true
+    }
+    
+    private func setupPlacemark(adressPlace: String) {
+        
+        let geocoder = CLGeocoder()
+        geocoder.geocodeAddressString(adressPlace) { [self] (placemarks, error) in
+            if let error = error {
+                print(error)
+                alertError(title: "Ошибка", message: "Сервер недоступен. Попробуйте добавить адрес еще раз")
+                return
+            }
+            
+            guard let placemarks = placemarks else { return }
+            let placemark = placemarks.first
+            
+            let annotation = MKPointAnnotation()
+            annotation.title = "\(adressPlace)"
+            
+            guard let placemarkLocation = placemark?.location else {return}
+            annotation.coordinate = placemarkLocation.coordinate
+            
+            annotationsArray.append(annotation)
+            
+            if annotationsArray.count > 2 {
+                routeButton.isHidden = false
+                resetButton.isHidden = false
+            }
+            mapView.showAnnotations(annotationsArray, animated: true)
+        }
+    }
+    private func createDirectionRequest(startCoordinate: CLLocationCoordinate2D, destinationCoordinate: CLLocationCoordinate2D) {
+        let startLocation = MKPlacemark(coordinate: startCoordinate)
+        let destinationLocation = MKPlacemark(coordinate: destinationCoordinate)
+        
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: startLocation)
+        request.destination = MKMapItem(placemark: destinationLocation)
+        request.transportType = .walking
+        request.requestsAlternateRoutes = true
+        
+        let direction = MKDirections(request: request)
+        direction.calculate { (response, error) in
+            if let error = error {
+                print(error)
+               return
+            }
+            guard let response = response else {
+                self.alertError(title: "Ошибка", message: "Маршрут недоступен")
+                return
+            }
+            var minRoute = response.routes[0]
+            for route in response.routes {
+                minRoute = (route.distance < minRoute.distance) ? route : minRoute
+            }
+            self.mapView.addOverlay(minRoute.polyline)
+        }
+    }
+}
+
+extension ViewController: MKMapViewDelegate {
+    func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+        let renderer = MKPolylineRenderer(overlay: overlay as! MKPolyline)
+        renderer.strokeColor = .systemGreen
+        return renderer
     }
 }
 
